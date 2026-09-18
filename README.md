@@ -49,11 +49,34 @@ silently voids both grants. If grants ever go stale anyway, clear them with
 
 The menu bar item shows which grant is outstanding.
 
+## Release build
+
+```sh
+./Scripts/package.sh
+```
+
+Produces `.dist/Murmur-<version>.zip`. The icon is generated from
+`Scripts/make-icon.swift` at build time rather than checked in.
+
 ## Tests
 
 ```sh
 swift test
 ```
 
-Audio conversion and clipboard save/restore are covered. The hotkey tap and the
-synthetic paste are verified by hand.
+Filler removal, gesture timing, audio conversion, and clipboard save/restore are
+covered. The event tap, the synthetic paste, and the on-device model are
+verified by hand: they need real permissions, a real keyboard, and real speech.
+
+## How it fits together
+
+| File | Does |
+|---|---|
+| `HotkeyMonitor` | Event tap on the modifier key, swallows it |
+| `HotkeyGesture` | Pure state machine: hold, double-tap latch, tap to stop |
+| `AudioCapture` | Mic tap, resampled to the analyzer's format |
+| `Transcriber` | `SpeechAnalyzer` session, emits finalized segments |
+| `Cleaner` | Regex disfluency removal, always on |
+| `Reframer` | On-device rewrite, opt-in, distrusted by default |
+| `Inserter` | Clipboard borrow, synthetic paste, restore |
+| `DictationController` | Wires the above, owns permission state |

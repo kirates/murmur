@@ -39,7 +39,13 @@ final class AudioCapture {
         }
 
         engine.prepare()
-        try engine.start()
+        do {
+            try engine.start()
+        } catch {
+            input.removeTap(onBus: 0)
+            self.converter = nil
+            throw error
+        }
         running = true
     }
 

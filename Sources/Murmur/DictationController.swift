@@ -142,9 +142,21 @@ final class DictationController: ObservableObject {
         scheduleWindowTimer()
 
         switch action {
-        case .startRecording: beginRecording()
-        case .stopRecording: endRecording()
-        case .none: break
+        case .startRecording:
+            // A press that arrives while the last utterance is still
+            // transcribing cannot start anything. Without this the gesture
+            // would go on to latch with no recording behind it.
+            guard state == .ready else {
+                gesture.reset()
+                windowTimer?.cancel()
+                windowTimer = nil
+                return
+            }
+            beginRecording()
+        case .stopRecording:
+            endRecording()
+        case .none:
+            break
         }
 
         // The latch engages part way through a recording that began as a hold.
