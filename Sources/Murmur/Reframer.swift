@@ -32,7 +32,7 @@ actor Reframer {
     /// model having answered the passage instead of repairing it.
     private static let minimumLengthRatio = 0.4
     private static let maximumLengthRatio = 2.0
-    private static let timeout: Duration = .seconds(12)
+    static let defaultTimeout: Duration = .seconds(12)
 
     private let model = SystemLanguageModel(useCase: .general,
                                             guardrails: .permissiveContentTransformations)
@@ -58,7 +58,7 @@ actor Reframer {
     }
 
     /// Returns the rewritten passage, or `nil` if it could not be trusted.
-    func reframe(_ text: String) async -> String? {
+    func reframe(_ text: String, within timeout: Duration = Reframer.defaultTimeout) async -> String? {
         guard model.isAvailable else { return nil }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -73,7 +73,7 @@ actor Reframer {
                     try await session.respond(to: trimmed, options: GenerationOptions(temperature: 0.2)).content
                 }
                 group.addTask {
-                    try await Task.sleep(for: Self.timeout)
+                    try await Task.sleep(for: timeout)
                     throw CancellationError()
                 }
                 let first = try await group.next()!
@@ -95,8 +95,14 @@ actor Reframer {
             .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
 
         guard !cleaned.isEmpty else { return nil }
-        guard !cleaned.localizedCaseInsensitiveContains("I can't") else { return nil }
-        guard !cleaned.localizedCaseInsensitiveContains("I cannot") else { return nil }
+
+        // A refusal only counts when the speaker did not say it themselves.
+        for refusal in ["I can't", "I cannot", "I'm unable"] {
+            if cleaned.localizedCaseInsensitiveContains(refusal),
+               !original.localizedCaseInsensitiveContains(refusal) {
+                return nil
+            }
+        }
 
         let ratio = Double(cleaned.count) / Double(max(original.count, 1))
         guard ratio >= minimumLengthRatio, ratio <= maximumLengthRatio else { return nil }

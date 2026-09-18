@@ -26,6 +26,9 @@ final class DictationController: ObservableObject {
     private var gesture = HotkeyGesture()
     private var windowTimer: DispatchWorkItem?
     private var segmentTask: Task<Void, Never>?
+    /// Session setup is async. Stopping must wait for it, or a stop can overtake
+    /// a start and leave an analyzer session running that nobody finalizes.
+    private var startTask: Task<Void, Never>?
     private var buffered: [String] = []
     private var streaming = false
     /// Serialises polishing and pasting so segments land in the order spoken.
@@ -189,7 +192,7 @@ final class DictationController: ObservableObject {
         buffered = []
         streaming = false
 
-        Task {
+        startTask = Task {
             do {
                 let session = try await transcriber.beginUtterance()
                 guard let format = await transcriber.audioFormat else {
@@ -218,12 +221,15 @@ final class DictationController: ObservableObject {
         capture.stop()
 
         Task {
+            await startTask?.value
+            startTask = nil
+
             await transcriber.finishUtterance()
             await segmentTask?.value
             segmentTask = nil
 
-            flushBuffer()
             streaming = false
+            flushBuffer()
             await insertionChain?.value
             insertionChain = nil
 
@@ -258,7 +264,7 @@ final class DictationController: ObservableObject {
             guard let self else { return }
             let text = await self.polish(raw)
             guard !text.isEmpty else { return }
-            Inserter.insert(trailingSpace ? text + " " : text)
+            await Inserter.insert(trailingSpace ? text + " " : text)
         }
     }
 
@@ -267,6 +273,9 @@ final class DictationController: ObservableObject {
     private func polish(_ raw: String) async -> String {
         let cleaned = Cleaner.clean(raw)
         guard reframeEnabled, reframeUnavailableReason == nil else { return cleaned }
-        return await reframer.reframe(cleaned) ?? cleaned
+        // Streaming segments are rewritten one after another while the user is
+        // still talking, so they get a tighter budget than a single utterance.
+        let budget: Duration = streaming ? .seconds(4) : .seconds(12)
+        return await reframer.reframe(cleaned, within: budget) ?? cleaned
     }
 }

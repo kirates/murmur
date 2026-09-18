@@ -34,6 +34,10 @@ actor Transcriber {
     /// How long to wait for the analyzer to flush after input closes.
     private static let finalizeTimeout: Duration = .seconds(10)
 
+    /// Assets are reserved and the audio format negotiated against this preset,
+    /// so the live session must be built with the same one.
+    private static let preset: SpeechTranscriber.Preset = .progressiveTranscription
+
     init(locale: Locale = Locale(identifier: "en-US")) {
         self.locale = locale
     }
@@ -50,7 +54,7 @@ actor Transcriber {
             throw TranscriberError.unsupportedLocale(locale)
         }
 
-        let module = SpeechTranscriber(locale: resolved, preset: .transcription)
+        let module = SpeechTranscriber(locale: resolved, preset: Self.preset)
 
         try await AssetInventory.reserve(locale: resolved)
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [module]) {
@@ -82,12 +86,11 @@ actor Transcriber {
         guard let resolvedLocale, let format else { throw TranscriberError.notPrepared }
         await discardUtterance()
 
-        let module = SpeechTranscriber(locale: resolvedLocale, preset: .progressiveTranscription)
-        // A latched session can run for hours. An unbounded buffer would grow
-        // without limit if the analyzer ever fell behind the microphone; this
-        // caps it at roughly twenty seconds of audio.
-        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream(
-            bufferingPolicy: .bufferingNewest(256))
+        let module = SpeechTranscriber(locale: resolvedLocale, preset: Self.preset)
+        // Unbounded on purpose. A bounded policy drops the oldest buffers, which
+        // loses words from the middle of a session with nothing to show for it;
+        // memory growth at least fails loudly.
+        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         let (segmentStream, segmentContinuation) = AsyncStream<String>.makeStream()
         let analyzer = SpeechAnalyzer(modules: [module])
         try await analyzer.prepareToAnalyze(in: format)
@@ -119,23 +122,26 @@ actor Transcriber {
         continuation?.finish()
         continuation = nil
 
+        // An analyzer or collector that never completes would strand the UI on
+        // "Transcribing…" with no way back short of quitting, so the timeout
+        // covers the finalize call as well as the drain.
+        let analyzer = self.analyzer
+        let collector = self.collector
+        self.analyzer = nil
+        self.collector = nil
+
+        let guardTask = Task {
+            try? await Task.sleep(for: Self.finalizeTimeout)
+            collector?.cancel()
+            await analyzer?.cancelAndFinishNow()
+        }
+
         if let analyzer {
             try? await analyzer.finalizeAndFinishThroughEndOfInput()
         }
-        analyzer = nil
+        await collector?.value
+        guardTask.cancel()
 
-        // A collector that never completes would strand the UI on
-        // "Transcribing…" with no way back short of quitting.
-        let collector = self.collector
-        self.collector = nil
-        if let collector {
-            let guardTask = Task {
-                try? await Task.sleep(for: Self.finalizeTimeout)
-                collector.cancel()
-            }
-            await collector.value
-            guardTask.cancel()
-        }
         segments?.finish()
         segments = nil
     }

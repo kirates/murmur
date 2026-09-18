@@ -22,15 +22,27 @@ final class CleanerTests: XCTestCase {
         XCTAssertEqual(Cleaner.clean("the thing that that broke"), "The thing that that broke")
     }
 
-    func testStripsLeadingMarkers() {
-        XCTAssertEqual(Cleaner.clean("so basically it works"), "Basically it works")
-        XCTAssertEqual(Cleaner.clean("okay so let's deploy"), "Let's deploy")
+    func testStripsLeadingMarkersSetOffByAComma() {
+        XCTAssertEqual(Cleaner.clean("so, basically it works"), "Basically it works")
+        XCTAssertEqual(Cleaner.clean("okay, so, let's deploy"), "Let's deploy")
         XCTAssertEqual(Cleaner.clean("alright, run the tests"), "Run the tests")
+    }
+
+    func testKeepsLeadingWordsThatStartARealSentence() {
+        XCTAssertEqual(Cleaner.clean("so far so good"), "So far so good")
+        XCTAssertEqual(Cleaner.clean("right click the button"), "Right click the button")
+        XCTAssertEqual(Cleaner.clean("well done on the release"), "Well done on the release")
     }
 
     func testStripsTrailingTags() {
         XCTAssertEqual(Cleaner.clean("we merge it tomorrow, right?"), "We merge it tomorrow?")
         XCTAssertEqual(Cleaner.clean("it needs a rebase, you know"), "It needs a rebase")
+    }
+
+    func testKeepsTrailingWordsThatCarryMeaning() {
+        XCTAssertEqual(Cleaner.clean("check whether the path is right"), "Check whether the path is right")
+        XCTAssertEqual(Cleaner.clean("do you know"), "Do you know")
+        XCTAssertEqual(Cleaner.clean("you know the answer"), "You know the answer")
     }
 
     func testLeavesTechnicalDictationIntact() {
@@ -55,7 +67,7 @@ final class CleanerTests: XCTestCase {
     }
 
     func testRealDictationSample() {
-        let spoken = "so I think that uh, what I want us to do is we build both"
+        let spoken = "so, I think that uh, what I want us to do is we build both"
         XCTAssertEqual(Cleaner.clean(spoken), "I think that what I want us to do is we build both")
     }
 }

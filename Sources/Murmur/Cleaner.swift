@@ -40,8 +40,11 @@ enum Cleaner {
     private static func removeFillers(_ text: String) -> String {
         let alternatives = fillers.joined(separator: "|")
         let pattern = "(?i)(?<![\\p{L}'])(?:\(alternatives))(?![\\p{L}'])[,.]?"
+        // "you know" only counts as filler when punctuation sets it off.
+        // Bare "you know the answer" is a clause, not a disfluency.
         var out = replace(text, pattern: pattern, with: " ")
-        out = replace(out, pattern: "(?i)(?<![\\p{L}'])you know(?![\\p{L}'])[,.]?", with: " ")
+        out = replace(out, pattern: "(?i),\\s*you know\\s*,", with: ", ")
+        out = replace(out, pattern: "(?i)^\\s*you know\\s*,", with: "")
         return out
     }
 
@@ -66,14 +69,18 @@ enum Cleaner {
     }
 
     private static func removeLeadingMarkers(_ text: String) -> String {
+        // The comma is required. Without it these words start real sentences:
+        // "so far so good", "well done", "right click the button".
         let alternatives = leadingMarkers.joined(separator: "|")
-        let pattern = "(?i)^\\s*(?:(?:\(alternatives))\\b[,\\s]+)+"
+        let pattern = "(?i)^\\s*(?:(?:\(alternatives))\\s*,\\s*)+"
         return replace(text, pattern: pattern, with: "")
     }
 
     private static func removeTrailingTags(_ text: String) -> String {
+        // Same again: a trailing tag must be set off by a comma, or "do you
+        // know" and "that is right" lose their last word.
         let alternatives = trailingTags.joined(separator: "|")
-        let pattern = "(?i)[,\\s]+(?:\(alternatives))\\s*([.?!]*)\\s*$"
+        let pattern = "(?i),\\s*(?:\(alternatives))\\s*([.?!]*)\\s*$"
         return replace(text, pattern: pattern, with: "$1")
     }
 
