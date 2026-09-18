@@ -31,6 +31,9 @@ actor Transcriber {
     private var collector: Task<Void, Never>?
     private var segments: AsyncStream<String>.Continuation?
 
+    /// How long to wait for the analyzer to flush after input closes.
+    private static let finalizeTimeout: Duration = .seconds(10)
+
     init(locale: Locale = Locale(identifier: "en-US")) {
         self.locale = locale
     }
@@ -80,7 +83,11 @@ actor Transcriber {
         await discardUtterance()
 
         let module = SpeechTranscriber(locale: resolvedLocale, preset: .progressiveTranscription)
-        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        // A latched session can run for hours. An unbounded buffer would grow
+        // without limit if the analyzer ever fell behind the microphone; this
+        // caps it at roughly twenty seconds of audio.
+        let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream(
+            bufferingPolicy: .bufferingNewest(256))
         let (segmentStream, segmentContinuation) = AsyncStream<String>.makeStream()
         let analyzer = SpeechAnalyzer(modules: [module])
         try await analyzer.prepareToAnalyze(in: format)
@@ -117,8 +124,19 @@ actor Transcriber {
         }
         analyzer = nil
 
-        await collector?.value
-        collector = nil
+        // A collector that never completes would strand the UI on
+        // "Transcribing…" with no way back short of quitting.
+        let collector = self.collector
+        self.collector = nil
+        if let collector {
+            let guardTask = Task {
+                try? await Task.sleep(for: Self.finalizeTimeout)
+                collector.cancel()
+            }
+            await collector.value
+            guardTask.cancel()
+        }
+        segments?.finish()
         segments = nil
     }
 
