@@ -14,6 +14,8 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/Murmur"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
+"$ROOT/Scripts/make-icns.sh" >/dev/null
+cp "$ROOT/Resources/Murmur.icns" "$APP/Contents/Resources/Murmur.icns"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 # TCC keys an ad-hoc signature on the binary hash, so every rebuild invalidates

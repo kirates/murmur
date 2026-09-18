@@ -2,6 +2,7 @@ import AppKit
 import XCTest
 @testable import Murmur
 
+@MainActor
 final class InserterTests: XCTestCase {
     private var pasteboard: NSPasteboard!
 

@@ -28,7 +28,8 @@ actor Transcriber {
     private var format: AVAudioFormat?
     private var analyzer: SpeechAnalyzer?
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
-    private var collector: Task<String, Never>?
+    private var collector: Task<Void, Never>?
+    private var segments: AsyncStream<String>.Continuation?
 
     init(locale: Locale = Locale(identifier: "en-US")) {
         self.locale = locale
@@ -66,37 +67,48 @@ actor Transcriber {
         self.format = format
     }
 
-    /// Opens a fresh analysis session and hands back the sink that audio buffers
-    /// should be yielded into.
-    func beginUtterance() async throws -> AsyncStream<AnalyzerInput>.Continuation {
+    /// A live dictation session: audio goes into `audio`, finalized text comes
+    /// out of `segments` as the analyzer commits it.
+    struct Session {
+        let audio: AsyncStream<AnalyzerInput>.Continuation
+        let segments: AsyncStream<String>
+    }
+
+    /// Opens a fresh analysis session.
+    func beginUtterance() async throws -> Session {
         guard let resolvedLocale, let format else { throw TranscriberError.notPrepared }
         await discardUtterance()
 
-        let module = SpeechTranscriber(locale: resolvedLocale, preset: .transcription)
+        let module = SpeechTranscriber(locale: resolvedLocale, preset: .progressiveTranscription)
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
+        let (segmentStream, segmentContinuation) = AsyncStream<String>.makeStream()
         let analyzer = SpeechAnalyzer(modules: [module])
         try await analyzer.prepareToAnalyze(in: format)
         try await analyzer.start(inputSequence: stream)
 
         collector = Task {
-            var text = AttributedString()
+            defer { segmentContinuation.finish() }
             do {
                 for try await result in module.results where result.isFinal {
-                    text.append(result.text)
+                    let text = String(result.text.characters)
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !text.isEmpty else { continue }
+                    segmentContinuation.yield(text)
                 }
             } catch {
-                return String(text.characters)
+                return
             }
-            return String(text.characters)
         }
 
         self.analyzer = analyzer
         self.continuation = continuation
-        return continuation
+        self.segments = segmentContinuation
+        return Session(audio: continuation, segments: segmentStream)
     }
 
-    /// Closes the session and returns everything that was transcribed.
-    func finishUtterance() async -> String {
+    /// Closes the session. The segment stream completes once the analyzer has
+    /// flushed everything it was holding.
+    func finishUtterance() async {
         continuation?.finish()
         continuation = nil
 
@@ -105,9 +117,9 @@ actor Transcriber {
         }
         analyzer = nil
 
-        let text = await collector?.value ?? ""
+        await collector?.value
         collector = nil
-        return text.trimmingCharacters(in: .whitespacesAndNewlines)
+        segments = nil
     }
 
     func discardUtterance() async {
@@ -119,5 +131,7 @@ actor Transcriber {
         analyzer = nil
         collector?.cancel()
         collector = nil
+        segments?.finish()
+        segments = nil
     }
 }

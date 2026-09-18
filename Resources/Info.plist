@@ -8,6 +8,8 @@
 	<string>Murmur</string>
 	<key>CFBundleIdentifier</key>
 	<string>com.kirates.murmur</string>
+	<key>CFBundleIconFile</key>
+	<string>Murmur</string>
 	<key>CFBundleExecutable</key>
 	<string>Murmur</string>
 	<key>CFBundlePackageType</key>

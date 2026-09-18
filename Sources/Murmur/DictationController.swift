@@ -25,6 +25,11 @@ final class DictationController: ObservableObject {
     private let reframer = Reframer()
     private var gesture = HotkeyGesture()
     private var windowTimer: DispatchWorkItem?
+    private var segmentTask: Task<Void, Never>?
+    private var buffered: [String] = []
+    private var streaming = false
+    /// Serialises polishing and pasting so segments land in the order spoken.
+    private var insertionChain: Task<Void, Never>?
 
     @Published private(set) var reframeUnavailableReason: String?
 
@@ -141,6 +146,14 @@ final class DictationController: ObservableObject {
         case .stopRecording: endRecording()
         case .none: break
         }
+
+        // The latch engages part way through a recording that began as a hold.
+        // Everything buffered so far is flushed, and later segments go straight
+        // out as the analyzer commits them.
+        if gesture.isLatched, !streaming, state == .recording {
+            streaming = true
+            flushBuffer()
+        }
     }
 
     private func scheduleWindowTimer() {
@@ -161,15 +174,25 @@ final class DictationController: ObservableObject {
         guard state == .ready else { return }
         state = .recording
 
+        buffered = []
+        streaming = false
+
         Task {
             do {
-                let sink = try await transcriber.beginUtterance()
+                let session = try await transcriber.beginUtterance()
                 guard let format = await transcriber.audioFormat else {
                     throw TranscriberError.notPrepared
                 }
-                try capture.start(outputFormat: format, sink: sink)
+                segmentTask = Task { [weak self] in
+                    for await segment in session.segments {
+                        await self?.receive(segment)  // hop to the main actor
+                    }
+                }
+                try capture.start(outputFormat: format, sink: session.audio)
             } catch {
                 capture.stop()
+                segmentTask?.cancel()
+                segmentTask = nil
                 await transcriber.discardUtterance()
                 gesture.reset()
                 state = .failed(error.localizedDescription)
@@ -183,14 +206,47 @@ final class DictationController: ObservableObject {
         capture.stop()
 
         Task {
-            let raw = await transcriber.finishUtterance()
-            let text = await polish(raw)
-            if !text.isEmpty {
-                Inserter.insert(text)
-            }
+            await transcriber.finishUtterance()
+            await segmentTask?.value
+            segmentTask = nil
+
+            flushBuffer()
+            streaming = false
+            await insertionChain?.value
+            insertionChain = nil
+
             if case .transcribing = state {
                 state = .ready
             }
+        }
+    }
+
+    /// A finalized segment arrived. In a latched session it is pasted straight
+    /// away; otherwise it waits for the end of the utterance so the rewrite can
+    /// see the whole passage.
+    private func receive(_ segment: String) {
+        guard streaming else {
+            buffered.append(segment)
+            return
+        }
+        enqueue(segment, trailingSpace: true)
+    }
+
+    private func flushBuffer() {
+        let pending = buffered.joined(separator: " ")
+        buffered = []
+        guard !pending.isEmpty else { return }
+        enqueue(pending, trailingSpace: streaming)
+    }
+
+    private func enqueue(_ raw: String, trailingSpace: Bool) {
+        let previous = insertionChain
+        insertionChain = Task { [weak self] in
+            await previous?.value
+            guard let self else { return }
+            let text = await self.polish(raw)
+            guard !text.isEmpty else { return }
+            Inserter.insert(trailingSpace ? text + " " : text)
         }
     }
 
