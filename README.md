@@ -40,7 +40,7 @@ Two grants are needed on first run:
 
 - **Microphone** — prompted automatically.
 - **Accessibility** — System Settings ▸ Privacy & Security ▸ Accessibility, add
-  `/Applications/Murmur.app`. Needed both to read the hotkey and to paste.
+  `/Applications/Murmur.app`. Needed both to read the hotkey and to type.
 
 The build is signed with an Apple Development identity. Ad-hoc signing does not
 work here: TCC keys an ad-hoc signature on the binary hash, so every rebuild
@@ -64,7 +64,7 @@ Produces `.dist/Murmur-<version>.zip`. The icon is generated from
 swift test
 ```
 
-Filler removal, gesture timing, audio conversion, and clipboard save/restore are
+Filler removal, gesture timing, audio conversion, and text chunking are
 covered. The event tap, the synthetic paste, and the on-device model are
 verified by hand: they need real permissions, a real keyboard, and real speech.
 
@@ -78,5 +78,5 @@ verified by hand: they need real permissions, a real keyboard, and real speech.
 | `Transcriber` | `SpeechAnalyzer` session, emits finalized segments |
 | `Cleaner` | Regex disfluency removal, always on |
 | `Reframer` | On-device rewrite, opt-in, distrusted by default |
-| `Inserter` | Clipboard borrow, synthetic paste, restore |
+| `Inserter` | Types the text as key events; never touches the clipboard |
 | `DictationController` | Wires the above, owns permission state |

@@ -12,6 +12,14 @@ actor Reframer {
         case unavailable(String)
     }
 
+    /// Guided generation. The model fills a typed field, so it has nowhere to
+    /// put "Sure, here is a revised version of the passage:".
+    @Generable
+    struct Rewrite {
+        @Guide(description: "The repaired passage only. No preamble, no commentary.")
+        var passage: String
+    }
+
     private static let instructions = """
         You repair dictated speech. The user spoke a passage and it was transcribed \
         verbatim, so it contains false starts, abandoned sentences, repeated ideas, \
@@ -62,7 +70,9 @@ actor Reframer {
         guard model.isAvailable else { return nil }
 
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.count > 12 else { return nil }
+        // Too short to be a passage. The model treats a fragment as a chat turn
+        // and asks for the text it was supposed to be given.
+        guard trimmed.split(separator: " ").count >= 6 else { return nil }
 
         let session = LanguageModelSession(model: model, instructions: Self.instructions)
 
@@ -70,7 +80,9 @@ actor Reframer {
         do {
             response = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask {
-                    try await session.respond(to: trimmed, options: GenerationOptions(temperature: 0.2)).content
+                    try await session.respond(to: trimmed,
+                                              generating: Rewrite.self,
+                                              options: GenerationOptions(temperature: 0.2)).content.passage
                 }
                 group.addTask {
                     try await Task.sleep(for: timeout)
@@ -96,10 +108,20 @@ actor Reframer {
 
         guard !cleaned.isEmpty else { return nil }
 
-        // A refusal only counts when the speaker did not say it themselves.
-        for refusal in ["I can't", "I cannot", "I'm unable"] {
-            if cleaned.localizedCaseInsensitiveContains(refusal),
-               !original.localizedCaseInsensitiveContains(refusal) {
+        // Phrases that mean the model is talking to the user rather than
+        // returning the passage. Any of them that the speaker did not say
+        // themselves disqualifies the whole response.
+        let chatter = [
+            "I can't", "I cannot", "I'm unable",
+            "here is a revised", "here's a revised",
+            "here is the rewritten", "here's the rewritten",
+            "revised version of the passage", "I can help with that",
+            "please provide", "would you like me to", "let me know if",
+            "sure, here", "certainly,",
+        ]
+        for phrase in chatter {
+            if cleaned.localizedCaseInsensitiveContains(phrase),
+               !original.localizedCaseInsensitiveContains(phrase) {
                 return nil
             }
         }

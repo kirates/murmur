@@ -37,4 +37,23 @@ final class ReframerTests: XCTestCase {
     func testRejectsEmptyOutput() {
         XCTAssertNil(Reframer.accept("   ", replacing: original))
     }
+
+    func testRejectsTheModelTalkingToTheUser() {
+        let chatty = [
+            "Sure, here is a revised version of the passage: we ship Friday.",
+            "Sure, I can help with that! Please provide the passage you would like me to rewrite.",
+            "Here's the rewritten passage: we ship on Friday when tests are green.",
+            "Certainly, we should ship the release on Friday after tests go green.",
+        ]
+        for candidate in chatty {
+            XCTAssertNil(Reframer.accept(candidate, replacing: original),
+                         "should have rejected: \(candidate)")
+        }
+    }
+
+    func testKeepsChatterPhrasesTheSpeakerActuallySaid() {
+        let spoken = "please provide the config file before you run the migration script"
+        let candidate = "Please provide the config file before you run the migration script."
+        XCTAssertEqual(Reframer.accept(candidate, replacing: spoken), candidate)
+    }
 }

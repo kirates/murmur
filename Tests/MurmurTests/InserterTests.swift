@@ -1,61 +1,38 @@
-import AppKit
 import XCTest
 @testable import Murmur
 
 @MainActor
 final class InserterTests: XCTestCase {
-    private var pasteboard: NSPasteboard!
-
-    override func setUp() {
-        super.setUp()
-        pasteboard = NSPasteboard(name: NSPasteboard.Name("com.kirates.murmur.tests"))
-        pasteboard.clearContents()
+    func testShortTextIsOneChunk() {
+        XCTAssertEqual(Inserter.chunks(of: "hello", size: 16), ["hello"])
     }
 
-    override func tearDown() {
-        pasteboard.releaseGlobally()
-        pasteboard = nil
-        super.tearDown()
+    func testLongTextIsSplitIntoChunks() {
+        let text = String(repeating: "a", count: 40)
+        let chunks = Inserter.chunks(of: text, size: 16)
+        XCTAssertEqual(chunks.count, 3)
+        XCTAssertEqual(chunks.joined(), text)
     }
 
-    func testRestoreBringsBackPlainText() {
-        pasteboard.clearContents()
-        pasteboard.setString("original clipboard", forType: .string)
-
-        let saved = Inserter.snapshot(of: pasteboard)
-
-        pasteboard.clearContents()
-        pasteboard.setString("dictated text", forType: .string)
-        XCTAssertEqual(pasteboard.string(forType: .string), "dictated text")
-
-        Inserter.restore(saved, to: pasteboard)
-        XCTAssertEqual(pasteboard.string(forType: .string), "original clipboard")
+    func testChunkingIsLossless() {
+        let text = "Ship the release on Friday, once every test is green."
+        XCTAssertEqual(Inserter.chunks(of: text, size: 7).joined(), text)
     }
 
-    func testRestorePreservesMultipleTypesOnOneItem() {
-        let item = NSPasteboardItem()
-        item.setData(Data("plain".utf8), forType: .string)
-        item.setData(Data("<b>rich</b>".utf8), forType: .html)
-        pasteboard.clearContents()
-        pasteboard.writeObjects([item])
-
-        let saved = Inserter.snapshot(of: pasteboard)
-        pasteboard.clearContents()
-        pasteboard.setString("dictated text", forType: .string)
-
-        Inserter.restore(saved, to: pasteboard)
-        XCTAssertEqual(pasteboard.string(forType: .string), "plain")
-        XCTAssertEqual(pasteboard.data(forType: .html).map { String(decoding: $0, as: UTF8.self) }, "<b>rich</b>")
+    func testDoesNotSplitAGraphemeCluster() {
+        let text = "e\u{0301}" + String(repeating: "x", count: 20)
+        for chunk in Inserter.chunks(of: text, size: 4) {
+            XCTAssertFalse(chunk.unicodeScalars.first?.properties.isDiacritic ?? false)
+        }
+        XCTAssertEqual(Inserter.chunks(of: text, size: 4).joined(), text)
     }
 
-    func testRestoringAnEmptySnapshotLeavesPasteboardEmpty() {
-        pasteboard.clearContents()
-        let saved = Inserter.snapshot(of: pasteboard)
+    func testEmojiSurviveChunking() {
+        let text = "done 👍🏽 shipping 🚀 now"
+        XCTAssertEqual(Inserter.chunks(of: text, size: 3).joined(), text)
+    }
 
-        pasteboard.clearContents()
-        pasteboard.setString("dictated text", forType: .string)
-
-        Inserter.restore(saved, to: pasteboard)
-        XCTAssertNil(pasteboard.string(forType: .string))
+    func testEmptyTextProducesNoChunks() {
+        XCTAssertEqual(Inserter.chunks(of: "", size: 16), [])
     }
 }
