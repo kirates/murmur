@@ -5,6 +5,9 @@ Push-to-talk dictation for macOS, built on Apple's on-device `SpeechAnalyzer`.
 Hold **right Option**, talk, release. The transcript is pasted into whatever app
 has focus.
 
+Double-tap right Option to latch recording on for long passages, then tap once
+more to stop. A latched session runs as long as you like.
+
 ## Cleanup
 
 Two passes run before the paste.
@@ -38,6 +41,11 @@ Two grants are needed on first run:
 - **Microphone** — prompted automatically.
 - **Accessibility** — System Settings ▸ Privacy & Security ▸ Accessibility, add
   `/Applications/Murmur.app`. Needed both to read the hotkey and to paste.
+
+The build is signed with an Apple Development identity. Ad-hoc signing does not
+work here: TCC keys an ad-hoc signature on the binary hash, so every rebuild
+silently voids both grants. If grants ever go stale anyway, clear them with
+`tccutil reset Accessibility com.kirates.murmur` and re-add the app.
 
 The menu bar item shows which grant is outstanding.
 

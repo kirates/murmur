@@ -10,6 +10,15 @@ struct MurmurApp: App {
         MenuBarExtra {
             Text(controller.statusText)
 
+            if controller.needsMicrophone {
+                Button("Open Microphone Settings…") {
+                    controller.openMicrophoneSettings()
+                }
+                Button("Check Again") {
+                    controller.recheckPermissions()
+                }
+            }
+
             if controller.needsAccessibility {
                 Button("Open Accessibility Settings…") {
                     controller.openAccessibilitySettings()
@@ -34,7 +43,8 @@ struct MurmurApp: App {
             }
             .keyboardShortcut("q")
         } label: {
-            Image(systemName: controller.isRecording ? "mic.fill" : "mic")
+            Image(systemName: controller.isLatched ? "mic.badge.plus"
+                : (controller.isRecording ? "mic.fill" : "mic"))
                 .task { controller.start() }
         }
     }

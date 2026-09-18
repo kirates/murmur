@@ -16,8 +16,16 @@ cp "$BIN" "$APP/Contents/MacOS/Murmur"
 cp "$ROOT/Resources/Info.plist" "$APP/Contents/Info.plist"
 printf 'APPL????' > "$APP/Contents/PkgInfo"
 
+# TCC keys an ad-hoc signature on the binary hash, so every rebuild invalidates
+# the user's Microphone and Accessibility grants. A real identity keeps them.
+IDENTITY="${CODESIGN_IDENTITY:-$(security find-identity -v -p codesigning \
+	| awk -F'"' '/Apple Development/ {print $2; exit}')}"
+: "${IDENTITY:=-}"
+
 codesign --force --deep --options runtime \
 	--entitlements "$ROOT/Resources/Murmur.entitlements" \
-	--sign - "$APP"
+	--sign "$IDENTITY" "$APP"
+
+echo "signed with: $IDENTITY" >&2
 
 echo "$APP"

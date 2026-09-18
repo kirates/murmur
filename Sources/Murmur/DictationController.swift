@@ -23,6 +23,8 @@ final class DictationController: ObservableObject {
     private let capture = AudioCapture()
     private let hotkey = HotkeyMonitor()
     private let reframer = Reframer()
+    private var gesture = HotkeyGesture()
+    private var windowTimer: DispatchWorkItem?
 
     @Published private(set) var reframeUnavailableReason: String?
 
@@ -35,6 +37,7 @@ final class DictationController: ObservableObject {
     }
 
     var isRecording: Bool { state == .recording }
+    var isLatched: Bool { gesture.isLatched }
 
     var statusText: String {
         switch state {
@@ -45,9 +48,9 @@ final class DictationController: ObservableObject {
         case .needsMicrophone:
             return "Needs microphone access"
         case .ready:
-            return "Hold right ⌥ to dictate"
+            return "Hold right ⌥ to dictate, double-tap to latch"
         case .recording:
-            return "Listening…"
+            return gesture.isLatched ? "Listening — tap right ⌥ to stop" : "Listening…"
         case .transcribing:
             return "Transcribing…"
         case .failed(let message):
@@ -57,9 +60,20 @@ final class DictationController: ObservableObject {
 
     var needsAccessibility: Bool { state == .needsAccessibility }
 
+    var needsMicrophone: Bool { state == .needsMicrophone }
+
+    func openMicrophoneSettings() {
+        let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone")!
+        NSWorkspace.shared.open(url)
+    }
+
     func start() {
-        hotkey.onPress = { [weak self] in self?.beginRecording() }
-        hotkey.onRelease = { [weak self] in self?.endRecording() }
+        hotkey.onPress = { [weak self] in
+            self?.apply(.press(at: ProcessInfo.processInfo.systemUptime))
+        }
+        hotkey.onRelease = { [weak self] in
+            self?.apply(.release(at: ProcessInfo.processInfo.systemUptime))
+        }
 
         Task { await bootstrap() }
     }
@@ -118,6 +132,31 @@ final class DictationController: ObservableObject {
         }
     }
 
+    private func apply(_ event: HotkeyGesture.Event) {
+        let action = gesture.handle(event)
+        scheduleWindowTimer()
+
+        switch action {
+        case .startRecording: beginRecording()
+        case .stopRecording: endRecording()
+        case .none: break
+        }
+    }
+
+    private func scheduleWindowTimer() {
+        windowTimer?.cancel()
+        windowTimer = nil
+
+        guard let deadline = gesture.pendingWindowDeadline else { return }
+        let delay = max(0, deadline - ProcessInfo.processInfo.systemUptime)
+
+        let work = DispatchWorkItem { [weak self] in
+            self?.apply(.windowExpired(at: ProcessInfo.processInfo.systemUptime))
+        }
+        windowTimer = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + delay, execute: work)
+    }
+
     private func beginRecording() {
         guard state == .ready else { return }
         state = .recording
@@ -132,6 +171,7 @@ final class DictationController: ObservableObject {
             } catch {
                 capture.stop()
                 await transcriber.discardUtterance()
+                gesture.reset()
                 state = .failed(error.localizedDescription)
             }
         }
