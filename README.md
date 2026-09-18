@@ -5,6 +5,20 @@ Push-to-talk dictation for macOS, built on Apple's on-device `SpeechAnalyzer`.
 Hold **right Option**, talk, release. The transcript is pasted into whatever app
 has focus.
 
+## Cleanup
+
+Two passes run before the paste.
+
+Filler removal always runs: `um`, `uh`, stutters, opening `so`/`okay`, trailing
+`right?`. These rules only delete tokens that carry no meaning, so a dictated
+shell command survives them.
+
+Sentence rewriting is off by default, behind **Clean up sentences** in the menu.
+It uses Apple's on-device model to resolve self-corrections, drop false starts,
+and punctuate. It can change meaning, so leave it off for code and turn it on for
+prose. If the model returns something suspicious — a refusal, an answer to your
+passage, a wildly different length — the rules-only text is used instead.
+
 ## Requirements
 
 macOS 26 or later, Apple Silicon, Xcode 26 toolchain.

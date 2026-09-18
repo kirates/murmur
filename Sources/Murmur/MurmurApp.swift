@@ -21,6 +21,14 @@ struct MurmurApp: App {
 
             Divider()
 
+            if let reason = controller.reframeUnavailableReason {
+                Text(reason)
+            } else {
+                Toggle("Clean up sentences", isOn: $controller.reframeEnabled)
+            }
+
+            Divider()
+
             Button("Quit Murmur") {
                 NSApplication.shared.terminate(nil)
             }

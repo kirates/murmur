@@ -24,7 +24,7 @@ enum TranscriberError: LocalizedError {
 
 actor Transcriber {
     private let locale: Locale
-    private var module: SpeechTranscriber?
+    private var resolvedLocale: Locale?
     private var format: AVAudioFormat?
     private var analyzer: SpeechAnalyzer?
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
@@ -39,7 +39,7 @@ actor Transcriber {
     /// Resolves the locale, installs the model if needed, and negotiates an audio
     /// format. Idempotent: later calls return immediately once prepared.
     func prepare(onProgress: @escaping @Sendable (Double) -> Void = { _ in }) async throws {
-        if module != nil, format != nil { return }
+        if resolvedLocale != nil, format != nil { return }
 
         guard SpeechTranscriber.isAvailable else { throw TranscriberError.unavailable }
         guard let resolved = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
@@ -62,16 +62,17 @@ actor Transcriber {
             throw TranscriberError.noCompatibleFormat
         }
 
-        self.module = module
+        self.resolvedLocale = resolved
         self.format = format
     }
 
     /// Opens a fresh analysis session and hands back the sink that audio buffers
     /// should be yielded into.
     func beginUtterance() async throws -> AsyncStream<AnalyzerInput>.Continuation {
-        guard let module, let format else { throw TranscriberError.notPrepared }
+        guard let resolvedLocale, let format else { throw TranscriberError.notPrepared }
         await discardUtterance()
 
+        let module = SpeechTranscriber(locale: resolvedLocale, preset: .transcription)
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
         let analyzer = SpeechAnalyzer(modules: [module])
         try await analyzer.prepareToAnalyze(in: format)
