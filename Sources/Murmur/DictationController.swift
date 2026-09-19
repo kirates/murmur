@@ -18,11 +18,13 @@ final class DictationController: ObservableObject {
     @Published private(set) var state: State = .installingModel(0)
 
     private static let reframeDefaultsKey = "reframeEnabled"
+    private static let liveDefaultsKey = "liveCorrectionsEnabled"
 
     private let transcriber = Transcriber()
     private let capture = AudioCapture()
     private let hotkey = HotkeyMonitor()
     private let reframer = Reframer()
+    private let interruptions = InterruptionMonitor()
     private var gesture = HotkeyGesture()
     private var windowTimer: DispatchWorkItem?
     private var segmentTask: Task<Void, Never>?
@@ -31,10 +33,18 @@ final class DictationController: ObservableObject {
     private var startTask: Task<Void, Never>?
     private var buffered: [String] = []
     private var streaming = false
+    /// Text typed from a volatile hypothesis, still ours to revise.
+    private var live = ""
+    /// Set when the user typed or clicked. What is on screen becomes theirs.
+    private var interrupted = false
     /// Serialises polishing and pasting so segments land in the order spoken.
     private var insertionChain: Task<Void, Never>?
 
     @Published private(set) var reframeUnavailableReason: String?
+
+    @Published var liveEnabled: Bool = UserDefaults.standard.bool(forKey: DictationController.liveDefaultsKey) {
+        didSet { UserDefaults.standard.set(liveEnabled, forKey: Self.liveDefaultsKey) }
+    }
 
     @Published var reframeEnabled: Bool = UserDefaults.standard.bool(forKey: DictationController.reframeDefaultsKey) {
         didSet {
@@ -82,6 +92,8 @@ final class DictationController: ObservableObject {
         hotkey.onRelease = { [weak self] in
             self?.apply(.release(at: ProcessInfo.processInfo.systemUptime))
         }
+        interruptions.onInterruption = { [weak self] in self?.userInterrupted() }
+        interruptions.start()
 
         Task { await bootstrap() }
     }
@@ -191,6 +203,8 @@ final class DictationController: ObservableObject {
 
         buffered = []
         streaming = false
+        live = ""
+        interrupted = false
 
         startTask = Task {
             do {
@@ -199,8 +213,8 @@ final class DictationController: ObservableObject {
                     throw TranscriberError.notPrepared
                 }
                 segmentTask = Task { [weak self] in
-                    for await segment in session.segments {
-                        await self?.receive(segment)  // hop to the main actor
+                    for await update in session.updates {
+                        await self?.receive(update)  // hop to the main actor
                     }
                 }
                 try capture.start(outputFormat: format, sink: session.audio)
@@ -229,6 +243,7 @@ final class DictationController: ObservableObject {
             segmentTask = nil
 
             streaming = false
+            live = ""
             flushBuffer()
             await insertionChain?.value
             insertionChain = nil
@@ -239,15 +254,51 @@ final class DictationController: ObservableObject {
         }
     }
 
-    /// A finalized segment arrived. In a latched session it is pasted straight
-    /// away; otherwise it waits for the end of the utterance so the rewrite can
+    /// Text arrived from the analyzer. In a latched session it goes out as it
+    /// forms; otherwise it waits for the end of the utterance so the rewrite can
     /// see the whole passage.
-    private func receive(_ segment: String) {
-        guard streaming else {
-            buffered.append(segment)
-            return
+    private func receive(_ update: Transcriber.Update) {
+        switch update {
+        case .volatile(let text):
+            guard streaming, liveEnabled, !interrupted else { return }
+            reviseLive(to: text)
+
+        case .final(let text):
+            guard streaming else {
+                buffered.append(text)
+                return
+            }
+            if liveEnabled, !interrupted {
+                // The hypothesis on screen is replaced by the cleaned final,
+                // which is the retroactive fix, and then stops being ours.
+                // The rewrite pass is skipped here: it takes seconds, and the
+                // user is still talking into the same tail.
+                reviseLive(to: Cleaner.clean(text, capitalize: false) + " ")
+                live = ""
+                return
+            }
+            enqueue(text, trailingSpace: true)
         }
-        enqueue(segment, trailingSpace: true)
+    }
+
+    /// Rewrites the uncommitted tail on screen to match the current hypothesis.
+    private func reviseLive(to target: String) {
+        let from = live
+        live = target
+        let previous = insertionChain
+        insertionChain = Task { [weak self] in
+            await previous?.value
+            guard let self, !self.interrupted else { return }
+            await Inserter.apply(LiveText.edit(from: from, to: target))
+        }
+    }
+
+    /// The user typed or clicked. Abandon the live tail rather than backspace
+    /// over whatever they just did.
+    private func userInterrupted() {
+        guard !live.isEmpty || !interrupted else { return }
+        interrupted = true
+        live = ""
     }
 
     private func flushBuffer() {

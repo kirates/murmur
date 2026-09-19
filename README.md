@@ -8,6 +8,22 @@ has focus.
 Double-tap right Option to latch recording on for long passages, then tap once
 more to stop. A latched session runs as long as you like.
 
+## Live corrections
+
+Off by default, behind **Live corrections** in the menu. With it on, a latched
+session types the recognizer's running hypothesis as you speak and revises it
+when later audio changes what an earlier word must have been — the text edits
+itself in place rather than waiting for each sentence to commit.
+
+Revision only ever reaches back over the uncommitted tail this app typed. The
+moment you type or click anything, that text becomes yours and is never
+backspaced over. Synthesized events are marked so the app does not mistake its
+own typing for yours.
+
+Live corrections and sentence rewriting do not combine: the rewrite takes
+seconds, and by then you are still talking into the same tail. With live on,
+only filler removal runs.
+
 ## Cleanup
 
 Two passes run before the paste.
@@ -78,5 +94,7 @@ verified by hand: they need real permissions, a real keyboard, and real speech.
 | `Transcriber` | `SpeechAnalyzer` session, emits finalized segments |
 | `Cleaner` | Regex disfluency removal, always on |
 | `Reframer` | On-device rewrite, opt-in, distrusted by default |
+| `LiveText` | Smallest edit from what is on screen to what is now believed |
+| `InterruptionMonitor` | Notices the user typing or clicking; freezes revision |
 | `Inserter` | Types the text as key events; never touches the clipboard |
 | `DictationController` | Wires the above, owns permission state |

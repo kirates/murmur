@@ -29,7 +29,7 @@ actor Transcriber {
     private var analyzer: SpeechAnalyzer?
     private var continuation: AsyncStream<AnalyzerInput>.Continuation?
     private var collector: Task<Void, Never>?
-    private var segments: AsyncStream<String>.Continuation?
+    private var segments: AsyncStream<Update>.Continuation?
 
     /// How long to wait for the analyzer to flush after input closes.
     private static let finalizeTimeout: Duration = .seconds(10)
@@ -74,11 +74,20 @@ actor Transcriber {
         self.format = format
     }
 
-    /// A live dictation session: audio goes into `audio`, finalized text comes
-    /// out of `segments` as the analyzer commits it.
+    /// What the analyzer currently believes was said.
+    ///
+    /// A volatile result is a running hypothesis that later audio can revise. A
+    /// final result supersedes the volatile text before it and never changes.
+    enum Update: Equatable {
+        case volatile(String)
+        case final(String)
+    }
+
+    /// A live dictation session: audio goes into `audio`, text comes out of
+    /// `updates` as the analyzer forms and then commits it.
     struct Session {
         let audio: AsyncStream<AnalyzerInput>.Continuation
-        let segments: AsyncStream<String>
+        let updates: AsyncStream<Update>
     }
 
     /// Opens a fresh analysis session.
@@ -91,7 +100,7 @@ actor Transcriber {
         // loses words from the middle of a session with nothing to show for it;
         // memory growth at least fails loudly.
         let (stream, continuation) = AsyncStream<AnalyzerInput>.makeStream()
-        let (segmentStream, segmentContinuation) = AsyncStream<String>.makeStream()
+        let (segmentStream, segmentContinuation) = AsyncStream<Update>.makeStream()
         let analyzer = SpeechAnalyzer(modules: [module])
         try await analyzer.prepareToAnalyze(in: format)
         try await analyzer.start(inputSequence: stream)
@@ -99,11 +108,15 @@ actor Transcriber {
         collector = Task {
             defer { segmentContinuation.finish() }
             do {
-                for try await result in module.results where result.isFinal {
+                for try await result in module.results {
                     let text = String(result.text.characters)
                         .trimmingCharacters(in: .whitespacesAndNewlines)
-                    guard !text.isEmpty else { continue }
-                    segmentContinuation.yield(text)
+                    if result.isFinal {
+                        guard !text.isEmpty else { continue }
+                        segmentContinuation.yield(.final(text))
+                    } else {
+                        segmentContinuation.yield(.volatile(text))
+                    }
                 }
             } catch {
                 return
@@ -113,7 +126,7 @@ actor Transcriber {
         self.analyzer = analyzer
         self.continuation = continuation
         self.segments = segmentContinuation
-        return Session(audio: continuation, segments: segmentStream)
+        return Session(audio: continuation, updates: segmentStream)
     }
 
     /// Closes the session. The segment stream completes once the analyzer has

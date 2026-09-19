@@ -23,7 +23,9 @@ enum Cleaner {
     /// Words English legitimately doubles, exempt from stutter collapsing.
     private static let legitimateDoubles: Set<String> = ["had", "that"]
 
-    static func clean(_ text: String) -> String {
+    /// - Parameter capitalize: off for live corrections, where changing the
+    ///   first character would force the whole sentence to be retyped.
+    static func clean(_ text: String, capitalize: Bool = true) -> String {
         let original = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !original.isEmpty else { return original }
 
@@ -32,7 +34,7 @@ enum Cleaner {
         result = collapseStutters(result)
         result = removeLeadingMarkers(result)
         result = removeTrailingTags(result)
-        result = tidy(result)
+        result = tidy(result, capitalize: capitalize)
 
         return result.isEmpty ? original : result
     }
@@ -84,7 +86,7 @@ enum Cleaner {
         return replace(text, pattern: pattern, with: "$1")
     }
 
-    private static func tidy(_ text: String) -> String {
+    private static func tidy(_ text: String, capitalize: Bool = true) -> String {
         var out = replace(text, pattern: "\\s+", with: " ")
         out = replace(out, pattern: "\\s+([,.?!;:])", with: "$1")
         out = replace(out, pattern: "([,.?!;:])(?=[\\p{L}])", with: "$1 ")
@@ -92,7 +94,7 @@ enum Cleaner {
         out = replace(out, pattern: "[,;:]+(\\s*[.?!]*)\\s*$", with: "$1")
         out = out.trimmingCharacters(in: .whitespacesAndNewlines)
 
-        guard let first = out.first, first.isLowercase else { return out }
+        guard capitalize, let first = out.first, first.isLowercase else { return out }
         return out.replacingCharacters(in: out.startIndex...out.startIndex, with: first.uppercased())
     }
 

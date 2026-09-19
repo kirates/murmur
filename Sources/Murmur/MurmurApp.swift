@@ -30,6 +30,8 @@ struct MurmurApp: App {
 
             Divider()
 
+            Toggle("Live corrections", isOn: $controller.liveEnabled)
+
             if let reason = controller.reframeUnavailableReason {
                 Text(reason)
             } else {
